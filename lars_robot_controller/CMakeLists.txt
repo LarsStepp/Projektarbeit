@@ -10,7 +10,6 @@ find_package(ament_cmake REQUIRED)
 find_package(controller_interface REQUIRED)
 find_package(franka_msgs REQUIRED)
 find_package(franka_semantic_components REQUIRED)
-find_package(pinocchio REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -19,6 +18,7 @@ find_package(hardware_interface REQUIRED)
 find_package(realtime_tools REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(moveit_core REQUIRED)
 
 add_library(${PROJECT_NAME}
               SHARED
@@ -37,7 +37,6 @@ add_library(${PROJECT_NAME}
         hardware_interface
         moveit_core
         moveit_msgs
-        pinocchio
         pluginlib
         rclcpp
         rclcpp_lifecycle
@@ -45,16 +44,19 @@ add_library(${PROJECT_NAME}
         realtime_tools
         hardware_interface
         geometry_msgs
+        sensor_msgs
   )
 
   pluginlib_export_plugin_description_file(
         controller_interface neutral_flexion_axis_controller_plugin.xml)
 
   install(
-        TARGETS
-        ${PROJECT_NAME}
-        DESTINATION lib
-  )
+        TARGETS ${PROJECT_NAME}
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin
+        )
+  
 
   install(
           DIRECTORY include/

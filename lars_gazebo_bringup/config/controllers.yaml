@@ -9,14 +9,14 @@ controller_manager:
       joint_state_broadcaster:
         type: joint_state_broadcaster/JointStateBroadcaster
 
-    neutral_flexion_axis_controller:
-      ros__parameters:
-        arm_id: fr3
-        driven_axis: 5          # 0-2 Translation, 3-5 Rotation, EE-Frame
-        axis_velocity: 0.05     # rad/s bei Rotationsachse
-        driven_axis_damping: 200.0
-        free_trans_damping: 15.0
-        free_rot_damping: 1.0
-        nullspace_damping: 2.0
-        max_force: 40.0
-        max_torque: 8.0
+neutral_flexion_axis_controller:
+  ros__parameters:
+    arm_id: fr3
+    driven_axis: 5          # 0-2 Translation, 3-5 Rotation, EE-Frame
+    axis_velocity: 0.05     # rad/s bei Rotationsachse
+    driven_axis_damping: 200.0
+    free_trans_damping: 15.0
+    free_rot_damping: 1.0
+    nullspace_damping: 2.0
+    max_force: 40.0
+    max_torque: 8.0

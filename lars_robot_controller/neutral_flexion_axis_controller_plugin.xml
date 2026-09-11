@@ -1,0 +1,10 @@
+<library path="lars_robot_controller">
+  <class name="lars_robot_controller/NeutralFlexionAxisController"
+         type="neutral_axis_controllers::NeutralFlexionAxisController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Hybrid velocity/admittance controller for knee neutral flexion axis
+      determination.
+    </description>
+  </class>
+</library>

@@ -15,15 +15,19 @@ find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
+find_package(hardware_interface REQUIRED)
+find_package(realtime_tools REQUIRED)
+find_package(Eigen3 REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 add_library(${PROJECT_NAME}
               SHARED
-              src/first_controller.cpp)
+              src/neutral_flexion_axis_controller.cpp)
   target_include_directories(
               ${PROJECT_NAME}
-              PUBLIC
+              PRIVATE
               include
-              ${EIGEN3_INCLUDE_DIRS})
+              ${EIGEN3_INCLUDE_DIR})
             
   ament_target_dependencies(
         ${PROJECT_NAME}
@@ -38,23 +42,27 @@ add_library(${PROJECT_NAME}
         rclcpp
         rclcpp_lifecycle
         std_srvs
+        realtime_tools
+        hardware_interface
+        geometry_msgs
   )
 
   pluginlib_export_plugin_description_file(
-        controller_interface lars_robot_controller.xml)
+        controller_interface neutral_flexion_axis_controller_plugin.xml)
 
   install(
         TARGETS
         ${PROJECT_NAME}
-        RUNTIME DESTINATION bin
-        ARCHIVE DESTINATION lib
-        LIBRARY DESTINATION lib
+        DESTINATION lib
   )
 
   install(
           DIRECTORY include/
           DESTINATION include
   )
+  ament_export_include_directories(include)
+  ament_export_libraries(${PROJECT_NAME})
+
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

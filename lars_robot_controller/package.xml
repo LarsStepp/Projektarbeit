@@ -19,6 +19,11 @@
   <depend>rclcpp_lifecycle</depend>
   <depend>sensor_msgs</depend>
   <depend>std_srvs</depend>
+  <depend>hardware_interface</depend>
+  <depend>realtime_tools</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+
 
   
 
@@ -27,5 +32,6 @@
 
   <export>
     <build_type>ament_cmake</build_type>
+    <controller_interface plugin="${prefix}/neutral_flexion_axis_controller_plugin.xml"/>
   </export>
 </package>

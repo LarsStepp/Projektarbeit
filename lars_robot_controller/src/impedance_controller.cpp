@@ -1,6 +1,6 @@
 #include "impedance_controller.hpp"
 
-class ImpedanceController{
+class CartesianImpedanceController{
         public:
             void configure(Eigen::Matrix<double,6,6> K, Eigen::Matrix<double,6,6> D){
                 K_ = K;

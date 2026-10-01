@@ -1,20 +1,3 @@
-// neutral_flexion_axis_controller.hpp
-//
-// Hybrid Geschwindigkeits-/Admittanzregler für franka_ros2.
-// Eine EE-Achse wird mit konstanter kartesischer Geschwindigkeit geführt
-// (quasi-kinematisch, über Geschwindigkeitsfehler-Rückführung), die
-// restlichen 5 kartesischen Freiheitsgrade sind rein compliant (K -> 0,
-// nur virtuelle Dämpfung), sodass das Unterbein die natürliche Bewegung
-// um die Knieachse ausführen kann.
-//
-// WICHTIG: Die exakten Methodennamen von franka_semantic_components::
-// FrankaRobotModel können sich zwischen franka_ros2-Versionen leicht
-// unterscheiden. Prüfe sie einmal in deinem Workspace mit:
-//
-//   grep -n "getZeroJacobian\|getMassMatrix\|getCoriolisForceVector\|getPoseMatrix" \
-//     $(ros2 pkg prefix franka_semantic_components)/include/franka_semantic_components/franka_robot_model.hpp
-//
-// und passe die Aufrufe unten ggf. an (Signaturen sind sonst 1:1 austauschbar).
 
 #pragma once
 
@@ -60,16 +43,6 @@ class NeutralFlexionAxisController : public controller_interface::ControllerInte
  private:
   static constexpr int kNumJoints = 7;
 
-  // ---- Parameter -----------------------------------------------------
-  std::string arm_id_;
-  int driven_axis_{5};        // 0..2 = Translation x,y,z (EE-Frame), 3..5 = Rotation x,y,z (EE-Frame)
-  double axis_velocity_{0.05};        // m/s (Translation) bzw. rad/s (Rotation)
-  double driven_axis_damping_{200.0}; // "steif" genug, um die Sollgeschwindigkeit zu tracken
-  double free_trans_damping_{15.0};   // N·s/m auf den freien Translationsachsen
-  double free_rot_damping_{1.0};      // Nm·s/rad auf den freien Rotationsachsen
-  double nullspace_damping_{2.0};
-  double max_force_{40.0};            // N, Sicherheitsclamp
-  double max_torque_{8.0};            // Nm, Sicherheitsclamp
 
   // ---- Franka Semantic Components -------------------------------------
   std::unique_ptr<franka_semantic_components::FrankaRobotModel> franka_robot_model_;
@@ -84,8 +57,7 @@ class NeutralFlexionAxisController : public controller_interface::ControllerInte
       rt_wrench_pub_;
 
   // ---- Hilfsfunktionen --------------------------------------------------
-  Eigen::Matrix<double, 6, 1> buildAxisDirectionInBase(const Eigen::Matrix3d& R_ee_in_base) const;
   Eigen::Matrix<double, 6, 1> saturateWrench(const Eigen::Matrix<double, 6, 1>& F) const;
 };
 
-}  // namespace neutral_axis_controllers
+} 

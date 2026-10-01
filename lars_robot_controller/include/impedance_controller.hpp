@@ -2,10 +2,10 @@
 
 namespace neutral_axis_controllers{
 
-    class ImpedanceController{
+    class CartesianImpedanceController{
         public:
             void configure(Eigen::Matrix<double,6,6> K, Eigen::Matrix<double,6,6> D);
-            Eigen::Vector3d Wrench compute_wrench(  Eigen::Vector6d x_d, Eigen::Vector6d dx_d, 
+            Eigen::Vector3d compute_wrench(  Eigen::Vector6d x_d, Eigen::Vector6d dx_d, 
                                                     Eigen::Vector6d x, Eigen::Vector6d dx);
 
         private: 

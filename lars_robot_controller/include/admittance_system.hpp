@@ -5,7 +5,6 @@
 namespace neutral_axis_controllers{
     class AdmittanceSystem{
         public:
-
             void initialize(const Eigen::Vector6d& x0);
             void update(const Wrench& F_explore,
                         const Wrench& F_interaction,

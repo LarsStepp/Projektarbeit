@@ -1,5 +1,8 @@
-#include "neutral_flexion_axis_controller.hpp"
+#pragma once
 
+#include "neutral_flexion_axis_controller.hpp"
+#include "admittance_system.hpp"
+#include "impedance_controller.hpp"
 #include <cmath>
 
 namespace neutral_axis_controllers {
@@ -7,14 +10,19 @@ namespace neutral_axis_controllers {
 controller_interface::CallbackReturn NeutralFlexionAxisController::on_init() {
   try {
     auto_declare<std::string>("arm_id", "fr3");
-    auto_declare<int>("driven_axis", 5);
-    auto_declare<double>("axis_velocity", 0.05);
-    auto_declare<double>("driven_axis_damping", 200.0);
     auto_declare<double>("free_trans_damping", 15.0);
     auto_declare<double>("free_rot_damping", 1.0);
     auto_declare<double>("nullspace_damping", 2.0);
     auto_declare<double>("max_force", 40.0);
     auto_declare<double>("max_torque", 8.0);
+    auto_declare<double>("admittance_mass",1.0);
+    auto_declare<double>("admittance_damping, 20.0");
+
+    admittance_ = AdmittanceSystem();
+    impedance_controller_ = CartesianImpedanceController();
+    exploration_generator_ = ExplorationGenerator();
+
+
   } catch (const std::exception& e) {
     RCLCPP_ERROR(get_node()->get_logger(), "on_init: %s", e.what());
     return controller_interface::CallbackReturn::ERROR;
@@ -25,21 +33,18 @@ controller_interface::CallbackReturn NeutralFlexionAxisController::on_init() {
 controller_interface::CallbackReturn NeutralFlexionAxisController::on_configure(
     const rclcpp_lifecycle::State& /*previous_state*/) {
   arm_id_ = get_node()->get_parameter("arm_id").as_string();
-  driven_axis_ = get_node()->get_parameter("driven_axis").as_int();
-  axis_velocity_ = get_node()->get_parameter("axis_velocity").as_double();
-  driven_axis_damping_ = get_node()->get_parameter("driven_axis_damping").as_double();
-  free_trans_damping_ = get_node()->get_parameter("free_trans_damping").as_double();
-  free_rot_damping_ = get_node()->get_parameter("free_rot_damping").as_double();
   nullspace_damping_ = get_node()->get_parameter("nullspace_damping").as_double();
   max_force_ = get_node()->get_parameter("max_force").as_double();
   max_torque_ = get_node()->get_parameter("max_torque").as_double();
 
+  // get franka robot model for jacobian and pose and 
+
   franka_robot_model_ = std::make_unique<franka_semantic_components::FrankaRobotModel>(
       franka_semantic_components::FrankaRobotModel(arm_id_ + "/robot_model",
                                                      arm_id_ + "/robot_state"));
+  
+  // get force torque sensor readings for admittance system
 
-  // K_F_ext_hat_K wird seit franka_ros2 v2.x als ForceTorqueSensor state interface
-  // exportiert: "<arm_id>_K_F_ext_hat_K/force.x", ".../force.y", ... ".../torque.z"
   force_torque_sensor_ = std::make_unique<semantic_components::ForceTorqueSensor>(
       arm_id_ + "_K_F_ext_hat_K");
 
@@ -66,6 +71,8 @@ controller_interface::CallbackReturn NeutralFlexionAxisController::on_configure(
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
+
+// commanded by controller: Effort/torque for every joint
 controller_interface::InterfaceConfiguration
 NeutralFlexionAxisController::command_interface_configuration() const {
   controller_interface::InterfaceConfiguration config;
@@ -76,6 +83,8 @@ NeutralFlexionAxisController::command_interface_configuration() const {
   return config;
 }
 
+
+//needed states: velocities and position
 controller_interface::InterfaceConfiguration
 NeutralFlexionAxisController::state_interface_configuration() const {
   controller_interface::InterfaceConfiguration config;
@@ -105,22 +114,9 @@ controller_interface::CallbackReturn NeutralFlexionAxisController::on_deactivate
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
-Eigen::Matrix<double, 6, 1> NeutralFlexionAxisController::buildAxisDirectionInBase(
-    const Eigen::Matrix3d& R_ee_in_base) const {
-  Eigen::Matrix<double, 6, 1> dir = Eigen::Matrix<double, 6, 1>::Zero();
-  Eigen::Vector3d e = Eigen::Vector3d::Zero();
-  int local_idx = driven_axis_ % 3;
-  e(local_idx) = 1.0;
-  Eigen::Vector3d dir_base = R_ee_in_base * e;  // EE-Achsrichtung, ausgedrückt in Basis-Frame
-  if (driven_axis_ < 3) {
-    dir.head<3>() = dir_base;   // translatorisch
-  } else {
-    dir.tail<3>() = dir_base;   // rotatorisch
-  }
-  return dir;
-}
 
-Eigen::Matrix<double, 6, 1> NeutralFlexionAxisController::saturateWrench(
+Eigen::Matrix<double, 6, 1> N
+  nullspace_damping_ = get_node()->get_parameter("nullspace_damping").as_double(NeutralFlexionAxisController::saturateWrench(
     const Eigen::Matrix<double, 6, 1>& F) const {
   Eigen::Matrix<double, 6, 1> out = F;
   double f_norm = out.head<3>().norm();
@@ -134,68 +130,140 @@ Eigen::Matrix<double, 6, 1> NeutralFlexionAxisController::saturateWrench(
   return out;
 }
 
-controller_interface::return_type NeutralFlexionAxisController::update(
-    const rclcpp::Time& time, const rclcpp::Duration& /*period*/) {
-  // --- Zustand lesen ------------------------------------------------
-  Eigen::Matrix<double, kNumJoints, 1> q, dq;
+Eigen::Matrix<double, kNumJoints, 1> NeutralFlexionAxisController::readRobotState(){
   for (int i = 0; i < kNumJoints; ++i) {
     q(i) = state_interfaces_[2 * i].get_value();
     dq(i) = state_interfaces_[2 * i + 1].get_value();
   }
+  return q, dq;
 
-  std::array<double, 42> jacobian_array =
-      franka_robot_model_->getZeroJacobian(franka::Frame::kEndEffector);
-  Eigen::Map<Eigen::Matrix<double, 6, 7>> J(jacobian_array.data());
+}
 
-  std::array<double, 7> coriolis_array = franka_robot_model_->getCoriolisForceVector();
-  Eigen::Map<Eigen::Matrix<double, 7, 1>> coriolis(coriolis_array.data());
+void NeutralFlexionAxisController::updateCalibration(){
+  
+}
 
-  std::array<double, 16> pose_array = franka_robot_model_->getPoseMatrix(franka::Frame::kEndEffector);
-  Eigen::Map<Eigen::Matrix4d> T_ee_in_base(pose_array.data());
-  Eigen::Matrix3d R_ee_in_base = T_ee_in_base.block<3, 3>(0, 0);
 
-  // externe Kraft/Moment im K-("EE"-)Frame, wie von franka_hardware geschätzt
+
+// externe Kraft/Moment im K-("EE"-)Frame, wie von franka_hardware geschätzt
+Eigen::Vector3d NeutralFlexionAxisController::readFTSensor(){
   Eigen::Vector3d f_ext_k(force_torque_sensor_->get_forces()[0],
                           force_torque_sensor_->get_forces()[1],
                           force_torque_sensor_->get_forces()[2]);
   Eigen::Vector3d tau_ext_k(force_torque_sensor_->get_torques()[0],
                              force_torque_sensor_->get_torques()[1],
                              force_torque_sensor_->get_torques()[2]);
+  return f_ext_k, tau_ext_k;
 
-  // --- Kartesische Geschwindigkeit -----------------------------------
-  Eigen::Matrix<double, 6, 1> v_ee_base = J * dq;  // in Basis-Frame
+}
 
-  // --- Achsauswahl: Richtung der geführten Achse, ausgedrückt in Basis-Frame
-  Eigen::Matrix<double, 6, 1> axis_dir = buildAxisDirectionInBase(R_ee_in_base);  // Einheitsvektor
-  Eigen::Matrix<double, 6, 6> S = axis_dir * axis_dir.transpose();                // Projektor: geführte Achse
-  Eigen::Matrix<double, 6, 6> P = Eigen::Matrix<double, 6, 6>::Identity() - S;    // Projektor: freie Achsen
+enum class ExperimentState
+{
+    CALIBRATION,
+    READY,
+    EXPLORATION,
+    FINISHED,
+    ERROR
+};
 
-  // --- Regelgesetz -----------------------------------------------------
-  // 1) geführte Achse: Geschwindigkeitsfehler-Rückführung (quasi-kinematisch)
-  Eigen::Matrix<double, 6, 1> v_ref = axis_velocity_ * axis_dir;
-  Eigen::Matrix<double, 6, 1> F_driven = S * (driven_axis_damping_ * (v_ref - v_ee_base));
 
-  // 2) freie Achsen: reiner virtueller Dämpfer, K -> 0 (Admittanzverhalten,
-  //    die externe Kraft/das Moment des Knies bewegt den EE frei gegen die Dämpfung)
-  Eigen::Matrix<double, 6, 6> D_free = Eigen::Matrix<double, 6, 6>::Zero();
-  D_free.diagonal() << free_trans_damping_, free_trans_damping_, free_trans_damping_,
-      free_rot_damping_, free_rot_damping_, free_rot_damping_;
-  Eigen::Matrix<double, 6, 1> F_free = P * (-D_free * v_ee_base);
+// MOST IMPORTANT FUNTION (ACTUAL CONTROLLER):
+// outer loop (lower freq): excitation -> F_ext -> estimate F_interaction from F_interaction = f_ext_k - F_grav_leg - F_coriolis
+// F_interaction -> virtual admittance system -> x_d, dx_d 
+// inner loop (higher freq): x_d, dx_d -> cartesian impedance controller
+// more compliant/safe than just commmon PD control)
+void NeutralFlexionAxisController::updateExploration(Eigen::Vector3d f_ext_k, Eigen::Vector3d F_g_leg, Eigen::Vector3d F_coriolis){
 
-  Eigen::Matrix<double, 6, 1> F_cmd = saturateWrench(F_driven + F_free);
+  // --- Outer loop: Generiere x_d und dx_d über admittanz und generiere anregung in verschiedenste richtungen
+  if admittance_timer_{
+    exploration_generator_.excite(); // hier noch logik ausbessern; excitation -> sense forces -> feed into admittance (so need to wait one update cycle)
+    F_interaction = f_ext_k - F_g_leg - F_coriolis;
+    x_d, dx_d = admittance_.update(F_interaction, dt);
+  }
+  
+  // --- inner loop: Cartesian Impedance Controller für compliant trajectory "tracking"
+  F_cmd = impedance_controller_.compute_wrench(x_d, dx_d, x, dx);
 
-  // --- Nullraum-Dämpfung (7 Gelenke, 6 kartesische Zwänge -> 1 Redundanz) ---
+
+  // --- Nullspace Damping (7 Gelenke, 6 kartesische Zwänge -> 1 Redundanz) ---
   Eigen::Matrix<double, 7, 6> J_pinv = J.transpose() * (J * J.transpose()).inverse();
   Eigen::Matrix<double, 7, 7> N =
-      Eigen::Matrix<double, 7, 7>::Identity() - J_pinv * J;
+  Eigen::Matrix<double, 7, 7>::Identity() - J_pinv * J;
   Eigen::Matrix<double, 7, 1> tau_null = N.transpose() * (-nullspace_damping_ * dq);
 
-  // --- Drehmomentkommando (Gravitation kompensiert libfranka intern selbst!) --
-  Eigen::Matrix<double, 7, 1> tau_cmd = J.transpose() * F_cmd + coriolis + tau_null;
+  // --- Drehmomentkommando (kompensiere gravitationskraft des beins) --
+  Eigen::Matrix<double, 7, 1> tau_cmd = J.transpose() * F_cmd + coriolis + tau_null + tau_grav_femur;
 
   for (int i = 0; i < kNumJoints; ++i) {
     command_interfaces_[i].set_value(tau_cmd(i));
   }
+}
+
+
+controller_interface::return_type NeutralFlexionAxisController::update(
+    const rclcpp::Time& time, const rclcpp::Duration& /*period*/) {
+  // --- Get State and Force/Torque readings ------------------------------------------------
+  Eigen::Matrix<double, kNumJoints, 1> q, dq = readRobotState();
+  Eigen::Vector3d f_ext_k, tau_ext_k = readFTSensor();
+  
+  
+  // get jacobian w.r.t end effector frame (to base frame)   
+  std::array<double, 42> jacobian_array =
+      franka_robot_model_->getZeroJacobian(franka::Frame::kEndEffector);
+  Eigen::Map<Eigen::Matrix<double, 6, 7>> J(jacobian_array.data());
+
+  // get coriolis force vector (for interaction force compensation)
+
+  std::array<double, 7> coriolis_array = franka_robot_model_->getCoriolisForceVector();
+  Eigen::Map<Eigen::Matrix<double, 7, 1>> coriolis(coriolis_array.data());
+
+  // Get cartesian end effector pose from homogeneous transformation matrix
+  std::array<double, 16> pose_array = franka_robot_model_->getPoseMatrix(franka::Frame::kEndEffector);
+  Eigen::Map<Eigen::Matrix4d> T_ee_in_base(pose_array.data());
+  Eigen::Vector3d x = ;
+
+  // --- Calculate cartesian velocity from joint velocities -----------------------------------
+  Eigen::Matrix<double, 6, 1> dx = J * dq;  // in Basis-Frame
+
+
+  //State machine
+
+  switch (state_){
+
+    case CALIBRATION:
+      updateCalibration(); // get F_g applied by leg (has to be subtracted from total external force
+                          // to isolate the interaction forces; probably model free; otherwise estimate mass and schwerpunkt)
+    break;
+
+    case READY:
+      updateReady();
+    break;
+
+    case EXPLORATION: // outer loop (lower freq): excitation -> F_ext -> get F_interaction
+                      // F_interaction -> virtual admittance system -> x_d, dx_d 
+                      // inner loop (higher freq): x_d, dx_d -> cartesian impedance controller
+                      // more compliant/safe than just commmon PD control)
+      updateExploration();
+    break;
+
+    case FINISHED:
+      holdSafePosition(); // compensate leg gravity to hold position (robot gravity already compensated by robot)
+    break;
+
+    case ERROR:
+      applySafeCommand(); // probably just move to safe position / gravity compensation
+    break;
+  }
+
+
+
+  
+
+
+
+  
+
+  
 
   // --- Logging: q, dq, F_ext/tau_ext für Post-Processing --------------
   if (rt_joint_state_pub_->trylock()) {

@@ -3,7 +3,7 @@
 <package format="3">
   <name>lars_robot_controller</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Impedance/admittance controller for knee neutral flexion axis determination</description>
   <maintainer email="lars@todo.todo">lars</maintainer>
   <license>TODO: License declaration</license>
 
@@ -17,10 +17,12 @@
   <depend>rclcpp</depend>
   <depend>rclcpp_lifecycle</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>std_srvs</depend>
   <depend>hardware_interface</depend>
   <depend>realtime_tools</depend>
   <depend>geometry_msgs</depend>
+  <depend>eigen</depend>
   <depend>moveit_core</depend>
 
 

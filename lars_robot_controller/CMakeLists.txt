@@ -12,59 +12,60 @@ find_package(franka_msgs REQUIRED)
 find_package(franka_semantic_components REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(realtime_tools REQUIRED)
 find_package(Eigen3 REQUIRED)
-find_package(geometry_msgs REQUIRED)
 find_package(moveit_core REQUIRED)
 
 add_library(${PROJECT_NAME}
-              SHARED
-              src/neutral_flexion_axis_controller.cpp)
-  target_include_directories(
-              ${PROJECT_NAME}
-              PRIVATE
-              include
-              ${EIGEN3_INCLUDE_DIR})
-            
-  ament_target_dependencies(
-        ${PROJECT_NAME}
-        controller_interface
-        franka_msgs
-        franka_semantic_components
-        hardware_interface
-        moveit_core
-        moveit_msgs
-        pluginlib
-        rclcpp
-        rclcpp_lifecycle
-        std_srvs
-        realtime_tools
-        hardware_interface
-        geometry_msgs
-        sensor_msgs
-  )
+  SHARED
+  src/neutral_flexion_axis_controller.cpp
+  src/admittance_system.cpp
+  src/impedance_controller.cpp
+  src/exploration_generator.cpp
+  src/flexion_guidance.cpp)
 
-  pluginlib_export_plugin_description_file(
-        controller_interface neutral_flexion_axis_controller_plugin.xml)
+target_include_directories(${PROJECT_NAME}
+  PRIVATE
+  include
+  ${EIGEN3_INCLUDE_DIR})
 
-  install(
-        TARGETS ${PROJECT_NAME}
-        ARCHIVE DESTINATION lib
-        LIBRARY DESTINATION lib
-        RUNTIME DESTINATION bin
-        )
-  
+ament_target_dependencies(${PROJECT_NAME}
+  controller_interface
+  franka_msgs
+  franka_semantic_components
+  hardware_interface
+  moveit_core
+  pluginlib
+  rclcpp
+  rclcpp_lifecycle
+  realtime_tools
+  geometry_msgs
+  sensor_msgs
+  std_msgs
+  std_srvs)
 
-  install(
-          DIRECTORY include/
-          DESTINATION include
-  )
-  ament_export_include_directories(include)
-  ament_export_libraries(${PROJECT_NAME})
+pluginlib_export_plugin_description_file(
+  controller_interface neutral_flexion_axis_controller_plugin.xml)
 
+install(
+  TARGETS ${PROJECT_NAME}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin)
+
+install(
+  DIRECTORY include/
+  DESTINATION include)
+
+
+ament_export_include_directories(include)
+ament_export_libraries(${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

@@ -11,6 +11,13 @@ Vector6d make6(double trans, double rot) {
   v << trans, trans, trans, rot, rot, rot;
   return v;
 }
+
+// Weiche Totzone: Vektoren kleiner als d werden 0, größere um d verkürzt (stetig)
+Eigen::Vector3d deadband(const Eigen::Vector3d& v, double d) {
+  const double n = v.norm();
+  if (n <= d) return Eigen::Vector3d::Zero();
+  return v * (1.0 - d / n);
+}
 }  // namespace
 
 // ============================================================================
@@ -21,8 +28,8 @@ controller_interface::CallbackReturn NeutralFlexionAxisController::on_init() {
   try {
     auto_declare<std::string>("arm_id", "fr3");
     auto_declare<double>("nullspace_damping", 2.0);
-    auto_declare<double>("max_force", 10.0);
-    auto_declare<double>("max_torque", 1.0);
+    auto_declare<double>("max_force", 40.0);
+    auto_declare<double>("max_torque", 8.0);
 
     // Impedanzregler (innere Schleife)
     auto_declare<double>("impedance_trans_stiffness", 200.0);  // N/m
@@ -62,6 +69,9 @@ controller_interface::CallbackReturn NeutralFlexionAxisController::on_init() {
 
     // Ablauf / Sicherheit
     auto_declare<double>("calibration_duration", 5.0);         // s
+    auto_declare<bool>("estimate_leg", true);                  // false: nur F/T-Offset (Test ohne Bein)
+    auto_declare<double>("interaction_deadband_force", 0.0);   // N
+    auto_declare<double>("interaction_deadband_torque", 0.0);  // Nm
     auto_declare<double>("max_tracking_error", 0.10);          // m
   } catch (const std::exception& e) {
     RCLCPP_ERROR(get_node()->get_logger(), "on_init: %s", e.what());
@@ -120,6 +130,9 @@ controller_interface::CallbackReturn NeutralFlexionAxisController::on_configure(
   use_optitrack_progress_ = node->get_parameter("use_optitrack_progress").as_bool();
   target_knee_angle_ = node->get_parameter("target_knee_angle_deg").as_double() * M_PI / 180.0;
   knee_angle_timeout_ = node->get_parameter("knee_angle_timeout").as_double();
+  estimate_leg_ = node->get_parameter("estimate_leg").as_bool();
+  deadband_force_ = node->get_parameter("interaction_deadband_force").as_double();
+  deadband_torque_ = node->get_parameter("interaction_deadband_torque").as_double();
 
   // Kniewinkel (OptiTrack) in GRAD, 0 = gestreckt
   knee_angle_sub_ = node->create_subscription<std_msgs::msg::Float64>(
@@ -153,7 +166,7 @@ controller_interface::CallbackReturn NeutralFlexionAxisController::on_configure(
 
   // Geschätzte externe Kraft/Moment im K-Frame
   force_torque_sensor_ = std::make_unique<semantic_components::ForceTorqueSensor>(
-      arm_id_ + "_K_F_ext_hat_K");
+      arm_id_ + "K_F_ext_hat_K");
 
   // Start der Exploration (nur wirksam im Zustand READY):
   //   ros2 service call /<controller>/start_exploration std_srvs/srv/Trigger
@@ -229,6 +242,10 @@ controller_interface::CallbackReturn NeutralFlexionAxisController::on_activate(
   cal_AtA_.setZero();
   cal_Atb_.setZero();
   cal_samples_ = 0;
+  cal_sum_f_.setZero();
+  cal_sum_tau_.setZero();
+  bias_f_.setZero();
+  bias_tau_.setZero();
   start_requested_.store(false);
   knee_angle_buffer_.writeFromNonRT(KneeAngleSample{});  // stamp = alt -> stale bis Daten kommen
   state_ = ExperimentState::CALIBRATION;
@@ -348,6 +365,8 @@ Wrench NeutralFlexionAxisController::updateCalibration(const ControlInput& in,
     const Eigen::Matrix3d A = -skew;  // tau = A * c
     cal_AtA_ += A.transpose() * A;
     cal_Atb_ += A.transpose() * tau_ext_k;
+    cal_sum_f_ += f_ext_k;
+    cal_sum_tau_ += tau_ext_k;
     ++cal_samples_;
   }
 
@@ -366,6 +385,18 @@ bool NeutralFlexionAxisController::finishCalibration() {
     RCLCPP_ERROR(get_node()->get_logger(), "Kalibrierung: zu wenige statische Samples (%d)",
                  cal_samples_);
     return false;
+  }
+  if (!estimate_leg_) {
+    // Test ohne Bein: nur den statischen F/T-Offset bestimmen, Beinmodell = 0
+    bias_f_ = cal_sum_f_ / cal_samples_;
+    bias_tau_ = cal_sum_tau_ / cal_samples_;
+    leg_mass_ = 0.0;
+    leg_com_k_.setZero();
+    RCLCPP_INFO(get_node()->get_logger(),
+                "Offset-Kalibrierung: f=[%.2f %.2f %.2f] N, tau=[%.3f %.3f %.3f] Nm",
+                bias_f_.x(), bias_f_.y(), bias_f_.z(), bias_tau_.x(), bias_tau_.y(),
+                bias_tau_.z());
+    return true;
   }
   leg_mass_ = std::max(0.0, cal_af_ / cal_aa_);
 
@@ -405,6 +436,8 @@ Wrench NeutralFlexionAxisController::updateExploration(const ControlInput& in) {
   if (cycle_counter_ % outer_loop_divider_ == 0) {
     F_explore_ = exploration_generator_.excite(state_time_);
     F_interaction_ = in.F_ext_base - in.F_g_leg;
+    F_interaction_.head<3>() = deadband(F_interaction_.head<3>(), deadband_force_);
+    F_interaction_.tail<3>() = deadband(F_interaction_.tail<3>(), deadband_torque_);
 
     // Richtung (Tangente), anisotrope Dämpfung und v_ref JEDEN Außenschritt neu
     last_guidance_ = guidance_.compute(in.x.p, state_time_);
@@ -498,8 +531,8 @@ controller_interface::return_type NeutralFlexionAxisController::update(
   in.dx = in.J * in.dq;  // Basis-Frame
 
   // --- Externe Kraft ins Basis-Frame, Beingewicht aus Modell ----------------
-  in.F_ext_base.head<3>() = in.R * f_ext_k;
-  in.F_ext_base.tail<3>() = in.R * tau_ext_k;
+  in.F_ext_base.head<3>() = in.R * (f_ext_k - bias_f_);
+  in.F_ext_base.tail<3>() = in.R * (tau_ext_k - bias_tau_);
   in.F_g_leg = legGravityWrench(in.R);
 
   // Erster Zyklus: Haltepose setzen

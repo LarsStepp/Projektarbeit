@@ -112,6 +112,9 @@ class NeutralFlexionAxisController : public controller_interface::ControllerInte
   bool use_optitrack_progress_ = false;
   double target_knee_angle_ = 0.087;    // rad, FINISHED wenn Kniewinkel <= Zielwinkel
   double knee_angle_timeout_ = 0.5;     // s
+  bool estimate_leg_ = true;            // false: Kalibrierung mittelt nur den F/T-Offset (Test ohne Bein)
+  double deadband_force_ = 0.0;         // N, Totzone auf F_interaction
+  double deadband_torque_ = 0.0;        // Nm
 
   // ---- Zustand -----------------------------------------------------------
   ExperimentState state_ = ExperimentState::CALIBRATION;
@@ -144,6 +147,10 @@ class NeutralFlexionAxisController : public controller_interface::ControllerInte
   Eigen::Matrix3d cal_AtA_ = Eigen::Matrix3d::Zero();
   Eigen::Vector3d cal_Atb_ = Eigen::Vector3d::Zero();
   int cal_samples_ = 0;
+  Eigen::Vector3d cal_sum_f_ = Eigen::Vector3d::Zero();    // Summen für Offset-Mittelung (K-Frame)
+  Eigen::Vector3d cal_sum_tau_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d bias_f_ = Eigen::Vector3d::Zero();       // F/T-Offset (K-Frame), wird abgezogen
+  Eigen::Vector3d bias_tau_ = Eigen::Vector3d::Zero();
 
   // ---- Logging (Realtime-Publisher, siehe INTEGRATION.md) -------------
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;

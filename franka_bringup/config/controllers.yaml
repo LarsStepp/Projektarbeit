@@ -84,6 +84,9 @@
       move_to_start_example_controller:
         type: franka_example_controllers/MoveToStartExampleController
 
+      neutral_flexion_axis_controller:
+        type: lars_robot_controller/NeutralFlexionAxisController
+
 /**:
   cartesian_elbow_example_controller:
     ros__parameters:
@@ -224,3 +227,56 @@
         - 10.0
         - 10.0
         - 5.0
+
+/**:
+  neutral_flexion_axis_controller:
+    ros__parameters:
+      arm_id: fr3
+
+      # --- Begrenzungen (Kommando-Wrench der Impedanz, vor J^T) ---
+      max_force: 8.0              # N
+      max_torque: 1.5             # Nm
+      nullspace_damping: 2.0
+
+      # --- Impedanz (innere Schleife): weich ---
+      impedance_trans_stiffness: 100.0   # N/m  (3 cm Fehler = 3 N)
+      impedance_rot_stiffness: 10.0      # Nm/rad
+      free_trans_damping: 30.0           # Ns/m
+      free_rot_damping: 2.5              # Nms/rad
+
+      # --- Admittanz (äußere Schleife) ---
+      admittance_mass: 2.0               # kg (träge = ruhig)
+      admittance_rot_mass: 0.1           # kgm^2
+      admittance_max_lin_vel: 0.03       # m/s (3x v_ref)
+      admittance_max_ang_vel: 0.1        # rad/s
+      outer_loop_divider: 10             # 100 Hz bei 1 kHz Regelfrequenz
+
+      # --- Führung ---
+      # Geometrie siehe Anleitung: Achse senkrecht, Zentrum 0.30 m neben der Start-EE-Position
+      knee_center: [0.0, 0.5, 0.2]       # <-- UNBEDINGT anpassen (Basis-Frame, in m)
+      knee_axis: [-1.0, 0.0, 0.0]
+      guidance_direction: 1.0
+      guidance_ang_vel_deg: 0.0          # Stufe 1: 0.0 (nur Hand-Test). Stufe 2: 1.9 (~1 cm/s bei r = 0.30 m)
+      guidance_ramp_time: 5.0
+      guidance_lin_damping_along: 100.0  # Ns/m
+      guidance_lin_damping_across: 200.0 # Ns/m
+      guidance_rot_damping_about: 2.0    # Nms/rad
+      guidance_rot_damping_across: 5.0   # Nms/rad
+
+      # --- Sicherheitsgrenzen ---
+      max_tracking_error: 0.03           # m
+      max_guidance_force: 6.0            # N, entlang Tangente -> ERROR
+      max_interaction_force: 10.0        # N -> ERROR
+      max_sweep_angle_deg: 15.0          # Grad (= ca. 8 cm Bogen bei r = 0.30 m)
+      exploration_duration: 30.0         # s
+
+      # --- Ablauf ---
+      calibration_duration: 3.0          # s, Roboter dabei NICHT berühren
+      estimate_leg: false                # nur F/T-Offset bestimmen, kein Beinmodell
+      interaction_deadband_force: 0.7    # N
+      interaction_deadband_torque: 0.05  # Nm
+      use_optitrack_progress: false
+
+      # --- Anregung aus ---
+      exploration_force_amp: 0.0
+      exploration_torque_amp: 0.0

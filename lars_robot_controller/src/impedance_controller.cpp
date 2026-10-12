@@ -1,21 +1,26 @@
 #include "impedance_controller.hpp"
 
-class CartesianImpedanceController{
-        public:
-            void configure(Eigen::Matrix<double,6,6> K, Eigen::Matrix<double,6,6> D){
-                K_ = K;
-                D_ = D;
-            }
-            Eigen::Vector3d compute_wrench(  Eigen::Vector6d x_d, Eigen::Vector6d dx_d, 
-                                                    Eigen::Vector6d x, Eigen::Vector6d dx){
+namespace neutral_axis_controllers {
 
-                                        Eigen::Vector6d wrench;
-                                        wrench = K_*(x_d - x)+D_*(dx_d - dx);
+void CartesianImpedanceController::configure(const Matrix6d& K, const Matrix6d& D) {
+  K_ = K;
+  D_ = D;
+}
 
-                                        return wrench
-            }
+Wrench CartesianImpedanceController::compute_wrench(const Pose& x_d, const Vector6d& dx_d,
+                                                    const Pose& x, const Vector6d& dx) const {
+  Vector6d e;
+  e.head<3>() = x_d.p - x.p;
 
-        private: 
-            Eigen::Matrix<double,6,6> K_;
-            Eigen::Matrix<double,6,6> D_;
-    }
+  // Orientierungsfehler als Rotationsvektor (kürzester Weg), im Basis-Frame
+  Eigen::Quaterniond dq = x_d.q * x.q.inverse();
+  if (dq.w() < 0.0) {
+    dq.coeffs() *= -1.0;
+  }
+  const Eigen::AngleAxisd aa(dq);
+  e.tail<3>() = aa.angle() * aa.axis();
+
+  return K_ * e + D_ * (dx_d - dx);
+}
+
+}  // namespace neutral_axis_controllers

@@ -1,15 +1,22 @@
-#include <Eigen/Dense>
-
-namespace neutral_axis_controllers{
-
-    class CartesianImpedanceController{
-        public:
-            void configure(Eigen::Matrix<double,6,6> K, Eigen::Matrix<double,6,6> D);
-            Eigen::Vector3d compute_wrench(  Eigen::Vector6d x_d, Eigen::Vector6d dx_d, 
-                                                    Eigen::Vector6d x, Eigen::Vector6d dx);
-
-        private: 
-            Eigen::Matrix<double,6,6> K_;
-            Eigen::Matrix<double,6,6> D_;
-    }
-}
+#pragma once
+ 
+#include "types.hpp"
+ 
+namespace neutral_axis_controllers {
+ 
+// Kartesischer Impedanzregler (innere Schleife):
+//   F_cmd = K * e(x_d, x) + D * (dx_d - dx)
+class CartesianImpedanceController {
+ public:
+  void configure(const Matrix6d& K, const Matrix6d& D);
+ 
+  // Rückgabe: Wrench im Basis-Frame am Endeffektor
+  Wrench compute_wrench(const Pose& x_d, const Vector6d& dx_d,
+                        const Pose& x, const Vector6d& dx) const;
+ 
+ private:
+  Matrix6d K_ = Matrix6d::Zero();
+  Matrix6d D_ = Matrix6d::Zero();
+};
+ 
+}  // namespace neutral_axis_controllers

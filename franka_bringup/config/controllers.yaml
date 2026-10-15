@@ -271,7 +271,7 @@
       exploration_duration: 30.0         # s
 
       # --- Ablauf ---
-      calibration_duration: 3.0          # s, Roboter dabei NICHT berühren
+      calibration_duration: 2.0          # s, Roboter dabei NICHT berühren
       estimate_leg: false                # nur F/T-Offset bestimmen, kein Beinmodell
       interaction_deadband_force: 0.7    # N
       interaction_deadband_torque: 0.05  # Nm

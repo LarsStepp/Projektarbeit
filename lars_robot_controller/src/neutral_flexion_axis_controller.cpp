@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace neutral_axis_controllers {
 
@@ -164,9 +165,9 @@ controller_interface::CallbackReturn NeutralFlexionAxisController::on_configure(
       franka_semantic_components::FrankaRobotModel(arm_id_ + "/robot_model",
                                                      arm_id_ + "/robot_state"));
 
-  // Geschätzte externe Kraft/Moment im K-Frame
-  force_torque_sensor_ = std::make_unique<semantic_components::ForceTorqueSensor>(
-      arm_id_ + "K_F_ext_hat_K");
+  for (const auto& name : franka_robot_state_->get_state_interface_names()) {
+    RCLCPP_INFO(node->get_logger(), "FrankaRobotState Interface: %s", name.c_str());
+  }
 
   // Start der Exploration (nur wirksam im Zustand READY):
   //   ros2 service call /<controller>/start_exploration std_srvs/srv/Trigger
@@ -225,15 +226,19 @@ NeutralFlexionAxisController::state_interface_configuration() const {
   }
   auto model_interfaces = franka_robot_model_->get_state_interface_names();
   config.names.insert(config.names.end(), model_interfaces.begin(), model_interfaces.end());
-  auto ft_interfaces = force_torque_sensor_->get_state_interface_names();
-  config.names.insert(config.names.end(), ft_interfaces.begin(), ft_interfaces.end());
+  // Das Robot-State-Interface (liefert u.a. K_F_ext_hat_K). Normalerweise fordert FrankaRobotModel
+  // es schon an -> nicht doppelt eintragen. Gelenk-Interfaces bleiben vorn (2*i / 2*i+1).
+  const std::string state_name = arm_id_ + "/robot_state";
+  if (std::find(config.names.begin(), config.names.end(), state_name) == config.names.end()) {
+    config.names.push_back(state_name);
+  }
   return config;
 }
 
 controller_interface::CallbackReturn NeutralFlexionAxisController::on_activate(
     const rclcpp_lifecycle::State& /*previous_state*/) {
   franka_robot_model_->assign_loaned_state_interfaces(state_interfaces_);
-  force_torque_sensor_->assign_loaned_state_interfaces(state_interfaces_);
+  franka_state_ = nullptr;  // wird im ersten update() aufgelöst
 
   // Zustand zurücksetzen: Start immer mit Kalibrierung
   leg_mass_ = 0.0;
@@ -259,7 +264,7 @@ controller_interface::CallbackReturn NeutralFlexionAxisController::on_activate(
 controller_interface::CallbackReturn NeutralFlexionAxisController::on_deactivate(
     const rclcpp_lifecycle::State& /*previous_state*/) {
   franka_robot_model_->release_interfaces();
-  force_torque_sensor_->release_interfaces();
+  franka_state_ = nullptr;
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -289,12 +294,33 @@ void NeutralFlexionAxisController::readRobotState(
 }
 
 // externe Kraft/Moment im K-("EE"-)Frame, wie von franka_hardware geschätzt
-void NeutralFlexionAxisController::readFTSensor(Eigen::Vector3d& f_ext_k,
-                                                Eigen::Vector3d& tau_ext_k) const {
-  const auto f = force_torque_sensor_->get_forces();
-  const auto t = force_torque_sensor_->get_torques();
-  f_ext_k << f[0], f[1], f[2];
-  tau_ext_k << t[0], t[1], t[2];
+// Pointer auf franka::RobotState aus dem Interface "<arm_id>/robot_state" holen.
+// Das Interface speichert die Bits des Pointers in einem double (Franka-Konvention,
+// siehe bit_cast in franka_robot_state.cpp).
+bool NeutralFlexionAxisController::resolveFrankaState() {
+  if (franka_state_ != nullptr) return true;
+  const std::string name = arm_id_ + "/robot_state";
+  for (const auto& si : state_interfaces_) {
+    if (si.get_name() == name) {
+      const double v = si.get_value();
+      const franka::RobotState* ptr = nullptr;
+      static_assert(sizeof(ptr) == sizeof(v), "Pointer und double müssen gleich groß sein");
+      std::memcpy(&ptr, &v, sizeof(ptr));
+      franka_state_ = ptr;
+      return franka_state_ != nullptr;
+    }
+  }
+  return false;
+}
+
+// K_F_ext_hat_K: [fx fy fz tx ty tz] im Stiffness-Frame K, direkt aus libfranka (keine Kopie)
+bool NeutralFlexionAxisController::readFTSensor(Eigen::Vector3d& f_ext_k,
+                                                Eigen::Vector3d& tau_ext_k) {
+  if (!resolveFrankaState()) return false;
+  const auto& w = franka_state_->K_F_ext_hat_K;
+  f_ext_k << w[0], w[1], w[2];
+  tau_ext_k << w[3], w[4], w[5];
+  return true;
 }
 
 // Kraft/Moment, die das Bein (Gewicht) auf den Roboter ausübt, im Basis-Frame.
@@ -511,7 +537,9 @@ controller_interface::return_type NeutralFlexionAxisController::update(
   // --- State + F/T --------------------------------------------------------
   Eigen::Vector3d f_ext_k, tau_ext_k;
   readRobotState(in.q, in.dq);
-  readFTSensor(f_ext_k, tau_ext_k);
+  if (!readFTSensor(f_ext_k, tau_ext_k)) {
+    return controller_interface::return_type::ERROR;  // kein Kraftsignal -> Controller stoppt
+  }
 
   // --- Kinematik / Dynamik vom Franka Robot Model --------------------------
   const std::array<double, 42> jacobian_array =

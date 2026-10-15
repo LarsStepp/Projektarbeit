@@ -12,8 +12,8 @@
 #include <hardware_interface/loaned_state_interface.hpp>
 #include <hardware_interface/loaned_command_interface.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <realtime_tools/realtime_buffer.h>
-#include <realtime_tools/realtime_publisher.h>
+#include <realtime_tools/realtime_buffer.hpp>
+#include <realtime_tools/realtime_publisher.hpp>
 
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <geometry_msgs/msg/wrench_stamped.hpp>
@@ -22,7 +22,7 @@
 #include <std_msgs/msg/float64_multi_array.hpp>
 
 #include <franka_semantic_components/franka_robot_model.hpp>
-#include <semantic_components/force_torque_sensor.hpp>
+#include <franka/robot_state.h>
 
 #include "admittance_system.hpp"
 #include "exploration_generator.hpp"
@@ -82,14 +82,17 @@ class NeutralFlexionAxisController : public controller_interface::ControllerInte
   // ---- Hilfsfunktionen --------------------------------------------------
   void readRobotState(Eigen::Matrix<double, kNumJoints, 1>& q,
                       Eigen::Matrix<double, kNumJoints, 1>& dq) const;
-  void readFTSensor(Eigen::Vector3d& f_ext_k, Eigen::Vector3d& tau_ext_k) const;
+  bool resolveFrankaState();
+  bool readFTSensor(Eigen::Vector3d& f_ext_k, Eigen::Vector3d& tau_ext_k);
   Wrench saturateWrench(const Wrench& F) const;
   Eigen::Matrix<double, kNumJoints, 1> computeTorque(const ControlInput& in,
                                                       const Wrench& F_cmd) const;
 
   // ---- Franka Semantic Components -------------------------------------
   std::unique_ptr<franka_semantic_components::FrankaRobotModel> franka_robot_model_;
-  std::unique_ptr<semantic_components::ForceTorqueSensor> force_torque_sensor_;
+  // Zeiger auf den libfranka-RobotState (steckt als Pointer-Bits im Interface "<arm_id>/robot_state",
+  // dasselbe macht FrankaRobotModel intern). Wird lazy im ersten update() aufgelöst.
+  const franka::RobotState* franka_state_ = nullptr;
 
   // ---- Regelungs-Bausteine ---------------------------------------------
   AdmittanceSystem admittance_;
